@@ -9,7 +9,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/greenix-studio/cli/internal/auth"
+	"github.com/greenixdb/cli/internal/auth"
 )
 
 var whoamiCmd = &cobra.Command{

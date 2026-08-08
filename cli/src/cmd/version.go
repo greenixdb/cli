@@ -44,6 +44,6 @@ func printVersion() {
 	
 	color.Set(color.FgYellow)
 	fmt.Println("📖 Documentation: https://docs.greenix.studio")
-	fmt.Println("🐛 Report issues: https://github.com/greenix-studio/cli/issues")
+fmt.Println("🐛 Report issues: https://github.com/greenixdb/cli/issues")
 	color.Unset()
 }

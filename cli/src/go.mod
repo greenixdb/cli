@@ -1,4 +1,4 @@
-module github.com/greenix-studio/cli
+module github.com/greenixdb/cli
 
 go 1.21
 

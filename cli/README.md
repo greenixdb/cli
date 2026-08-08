@@ -6,7 +6,7 @@ A command-line tool for building, deploying, and managing Greenix Studio project
 
 ### Download Binary
 
-Download the appropriate binary for your platform from the [releases page](https://github.com/greenix-studio/cli/releases):
+Download the appropriate binary for your platform from the [releases page](https://github.com/greenixdb/cli/releases):
 
 - **Windows**: `greenix.exe`
 - **macOS**: `greenix`
@@ -15,7 +15,7 @@ Download the appropriate binary for your platform from the [releases page](https
 ### Build from Source
 
 ```bash
-git clone https://github.com/greenix-studio/cli.git
+git clone https://github.com/greenixdb/cli.git
 cd cli/src
 go build -o greenix
 ```
@@ -76,87 +76,3 @@ go build -o greenix
 License
 
 PROPRIETARY License - see LICENSE for details.
-
-```
-
----
-
-## 5. Git Configuration
-
-### `cli/.gitignore`
-```
-
-Binaries
-
-*.exe
-*.exe~
-*.dll
-*.so
-.dylib
-greenix
-greenix-
-
-Test binary
-
-*.test
-
-Output of the go coverage tool
-
-*.out
-
-Dependency directories
-
-vendor/
-
-Go workspace file
-
-go.work
-
-IDE
-
-.idea/
-.vscode/
-*.swp
-*.swo
-
-Build output
-
-build-output/
-dist/
-
-OS files
-
-.DS_Store
-Thumbs.db
-
-```
-
----
-
-## 6. Usage Examples
-
-### Build the CLI locally
-```bash
-cd cli/src
-go build -o greenix
-./greenix version
-```
-
-Output
-
-```
-██████╗ ██████╗ ███████╗███████╗███╗   ██╗██╗██╗  ██╗
-██╔════╝ ██╔══██╗██╔════╝██╔════╝████╗  ██║██║╚██╗██╔╝
-██║  ███╗██████╔╝█████╗  █████╗  ██╔██╗ ██║██║ ╚███╔╝ 
-██║   ██║██╔══██╗██╔══╝  ██╔══╝  ██║╚██╗██║██║ ██╔██╗ 
-╚██████╔╝██║  ██║███████╗███████╗██║ ╚████║██║██╔╝ ██╗
- ╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝
-
-📦 Greenix Studio CLI v1.2.3 (Build 123)
-   Build Date: 2026-08-08 14:30:00
-   Go Version: go1.21.5
-   Platform:   darwin/arm64
-
-📖 Documentation: https://docs.greenix.studio
-🐛 Report issues: https://github.com/greenix-studio/cli/issues
-```

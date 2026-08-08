@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/greenix-studio/cli/cmd"
+	"github.com/greenixdb/cli/cmd"
 )
 
 var (
