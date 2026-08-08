@@ -1,0 +1,91 @@
+name: Build CLI Tool
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            goos: windows
+            arch: amd64
+            arch_dir: x64
+            ext: .exe
+          - os: windows-latest
+            goos: windows
+            arch: 386
+            arch_dir: x86
+            ext: .exe
+          - os: windows-latest
+            goos: windows
+            arch: arm64
+            arch_dir: arm64
+            ext: .exe
+          - os: macos-latest
+            goos: darwin
+            arch: amd64
+            arch_dir: x64
+            ext: ''
+          - os: macos-latest
+            goos: darwin
+            arch: arm64
+            arch_dir: arm64
+            ext: ''
+          - os: ubuntu-latest
+            goos: linux
+            arch: amd64
+            arch_dir: x64
+            ext: ''
+          - os: ubuntu-latest
+            goos: linux
+            arch: 386
+            arch_dir: x86
+            ext: ''
+          - os: ubuntu-latest
+            goos: linux
+            arch: arm64
+            arch_dir: arm64
+            ext: ''
+
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      
+      - name: Read version
+        run: |
+          if [ -f version.properties ]; then
+            source version.properties
+            echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
+            echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
+          else
+            echo "VERSION_NAME=dev" >> $GITHUB_ENV
+            echo "VERSION_CODE=0" >> $GITHUB_ENV
+          fi
+        shell: bash
+      
+      - name: Build CLI
+        run: |
+          mkdir -p build-output/cli/${{ matrix.goos }}/${{ matrix.arch_dir }}
+          cd cli/src
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.arch }} go build \
+            -ldflags "-X main.Version=${{ env.VERSION_NAME }} -X main.BuildCode=${{ env.VERSION_CODE }} -X main.BuildDate=$(date '+%Y-%m-%d %H:%M:%S')" \
+            -o ../build-output/cli/${{ matrix.goos }}/${{ matrix.arch_dir }}/greenix-${{ env.VERSION_NAME }}-${{ env.VERSION_CODE }}${{ matrix.ext }}
+        shell: bash
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.goos }}-${{ matrix.arch_dir }}
+          path: build-output/cli/${{ matrix.goos }}/${{ matrix.arch_dir }}/
+
+          
