@@ -1,61 +1,43 @@
 #!/bin/bash
+# Builds macOS binaries into the same layout the CI workflow produces:
+#   build-output/macos/<x64|arm64>/greenix-cli-v<VERSION_NAME>-<VERSION_CODE>
+set -u
 
-# Read version from root
-if [ -f "../../version.properties" ]; then
-    source ../../version.properties
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+if [ -f "$ROOT_DIR/version.properties" ]; then
+    source "$ROOT_DIR/version.properties"
 else
     VERSION_NAME="dev"
     VERSION_CODE="0"
 fi
 
-BUILD_DATE=$(date "+%Y-%m-%d %H:%M:%S")
+BUILD_DATE=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
+BIN="greenix-cli-v${VERSION_NAME}-${VERSION_CODE}"
 
-echo "📦 Building Greenix CLI v$VERSION_NAME (Build $VERSION_CODE)"
+echo "📦 Building Greenix CLI v$VERSION_NAME (Build $VERSION_CODE) - macos"
 echo ""
 
-# Build x64 (Intel)
-mkdir -p ../build-output/cli/macos/x64
-echo "🔨 Building x64 (Intel)..."
-GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.Version=$VERSION_NAME -X main.BuildCode=$VERSION_CODE -X main.BuildDate='$BUILD_DATE'" \
-    -o ../build-output/cli/macos/x64/greenix-$VERSION_NAME-$VERSION_CODE ../src
+for arch in x64 arm64; do
+    case $arch in
+        x64) goarch="amd64" ;;
+        arm64) goarch="arm64" ;;
+    esac
 
-if [ $? -eq 0 ]; then
-    echo "✅ Built x64"
-    ln -sf greenix-$VERSION_NAME-$VERSION_CODE ../build-output/cli/macos/x64/greenix
-else
-    echo "❌ Failed to build x64"
-fi
+    OUT_DIR="$ROOT_DIR/build-output/macos/$arch"
+    mkdir -p "$OUT_DIR"
+    echo "🔨 Building $arch..."
 
-# Build arm64 (Apple Silicon)
-mkdir -p ../build-output/cli/macos/arm64
-echo "🔨 Building arm64 (Apple Silicon)..."
-GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.Version=$VERSION_NAME -X main.BuildCode=$VERSION_CODE -X main.BuildDate='$BUILD_DATE'" \
-    -o ../build-output/cli/macos/arm64/greenix-$VERSION_NAME-$VERSION_CODE ../src
+    (cd "$ROOT_DIR/cli/src" && GOOS=darwin GOARCH=$goarch CGO_ENABLED=0 go build -trimpath \
+        -ldflags "-s -w -X main.Version=$VERSION_NAME -X main.BuildCode=$VERSION_CODE -X 'main.BuildDate=$BUILD_DATE'" \
+        -o "$OUT_DIR/$BIN" .)
 
-if [ $? -eq 0 ]; then
-    echo "✅ Built arm64"
-    ln -sf greenix-$VERSION_NAME-$VERSION_CODE ../build-output/cli/macos/arm64/greenix
-else
-    echo "❌ Failed to build arm64"
-fi
-
-# Create Universal Binary
-echo ""
-echo "🔨 Creating Universal Binary..."
-mkdir -p ../build-output/cli/macos/universal
-
-lipo -create -output ../build-output/cli/macos/universal/greenix-$VERSION_NAME-$VERSION_CODE \
-    ../build-output/cli/macos/x64/greenix-$VERSION_NAME-$VERSION_CODE \
-    ../build-output/cli/macos/arm64/greenix-$VERSION_NAME-$VERSION_CODE
-
-if [ $? -eq 0 ]; then
-    echo "✅ Universal Binary created"
-    ln -sf greenix-$VERSION_NAME-$VERSION_CODE ../build-output/cli/macos/universal/greenix
-    chmod +x ../build-output/cli/macos/universal/greenix-$VERSION_NAME-$VERSION_CODE
-else
-    echo "❌ Failed to create Universal Binary"
-fi
-
-echo ""
-echo "✅ Build complete!"
-
+    if [ $? -eq 0 ]; then
+        chmod +x "$OUT_DIR/$BIN"
+        echo "✅ Built $OUT_DIR/$BIN"
+    else
+        echo "❌ Failed to build $arch"
+    fi
+    echo ""
+done

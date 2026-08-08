@@ -1,42 +1,44 @@
 #!/bin/bash
+# Builds Linux binaries into the same layout the CI workflow produces:
+#   build-output/linux/<x86|x64|arm64>/greenix-cli-v<VERSION_NAME>-<VERSION_CODE>
+set -u
 
-# Read version from root
-if [ -f "../../version.properties" ]; then
-    source ../../version.properties
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+if [ -f "$ROOT_DIR/version.properties" ]; then
+    source "$ROOT_DIR/version.properties"
 else
     VERSION_NAME="dev"
     VERSION_CODE="0"
 fi
 
-BUILD_DATE=$(date "+%Y-%m-%d %H:%M:%S")
+BUILD_DATE=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
+BIN="greenix-cli-v${VERSION_NAME}-${VERSION_CODE}"
 
-echo "📦 Building Greenix CLI v$VERSION_NAME (Build $VERSION_CODE)"
+echo "📦 Building Greenix CLI v$VERSION_NAME (Build $VERSION_CODE) - linux"
 echo ""
 
-# Build architectures
 for arch in x86 x64 arm64; do
-    goarch=""
     case $arch in
         x86) goarch="386" ;;
         x64) goarch="amd64" ;;
         arm64) goarch="arm64" ;;
     esac
-    
-    mkdir -p ../build-output/cli/linux/$arch
+
+    OUT_DIR="$ROOT_DIR/build-output/linux/$arch"
+    mkdir -p "$OUT_DIR"
     echo "🔨 Building $arch..."
-    
-    GOOS=linux GOARCH=$goarch go build -ldflags "-X main.Version=$VERSION_NAME -X main.BuildCode=$VERSION_CODE -X main.BuildDate='$BUILD_DATE'" \
-        -o ../build-output/cli/linux/$arch/greenix-$VERSION_NAME-$VERSION_CODE ../src
-    
+
+    (cd "$ROOT_DIR/cli/src" && GOOS=linux GOARCH=$goarch CGO_ENABLED=0 go build -trimpath \
+        -ldflags "-s -w -X main.Version=$VERSION_NAME -X main.BuildCode=$VERSION_CODE -X 'main.BuildDate=$BUILD_DATE'" \
+        -o "$OUT_DIR/$BIN" .)
+
     if [ $? -eq 0 ]; then
-        echo "✅ Built $arch"
-        ln -sf greenix-$VERSION_NAME-$VERSION_CODE ../build-output/cli/linux/$arch/greenix
-        chmod +x ../build-output/cli/linux/$arch/greenix-$VERSION_NAME-$VERSION_CODE
+        chmod +x "$OUT_DIR/$BIN"
+        echo "✅ Built $OUT_DIR/$BIN"
     else
         echo "❌ Failed to build $arch"
     fi
     echo ""
 done
-
-echo "✅ Build complete!"
-
