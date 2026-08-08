@@ -8,62 +8,30 @@ on:
 permissions:
   contents: write
 
+env:
+  BIN_NAME: greenix
+
 jobs:
+  # ---------------------------------------------------------------------
+  # 1. Compile one binary per platform/arch.
+  # ---------------------------------------------------------------------
   build:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            goos: windows
-            platform: windows
-            arch: amd64
-            arch_dir: x64
-            ext: .exe
-          - os: ubuntu-latest
-            goos: windows
-            platform: windows
-            arch: '386'
-            arch_dir: x86
-            ext: .exe
-          - os: ubuntu-latest
-            goos: windows
-            platform: windows
-            arch: arm64
-            arch_dir: arm64
-            ext: .exe
-          - os: macos-latest
-            goos: darwin
-            platform: macos
-            arch: amd64
-            arch_dir: x64
-            ext: ''
-          - os: macos-latest
-            goos: darwin
-            platform: macos
-            arch: arm64
-            arch_dir: arm64
-            ext: ''
-          - os: ubuntu-latest
-            goos: linux
-            platform: linux
-            arch: amd64
-            arch_dir: x64
-            ext: ''
-          - os: ubuntu-latest
-            goos: linux
-            platform: linux
-            arch: '386'
-            arch_dir: x86
-            ext: ''
-          - os: ubuntu-latest
-            goos: linux
-            platform: linux
-            arch: arm64
-            arch_dir: arm64
-            ext: ''
+          - { goos: windows, platform: windows, arch: amd64, arch_dir: x64,   ext: .exe, prefix: bin }
+          - { goos: windows, platform: windows, arch: '386', arch_dir: x86,   ext: .exe, prefix: bin }
+          - { goos: windows, platform: windows, arch: arm64, arch_dir: arm64, ext: .exe, prefix: bin }
+          - { goos: linux,   platform: linux,   arch: amd64, arch_dir: x64,   ext: '',   prefix: bin }
+          - { goos: linux,   platform: linux,   arch: '386', arch_dir: x86,   ext: '',   prefix: bin }
+          - { goos: linux,   platform: linux,   arch: arm64, arch_dir: arm64, ext: '',   prefix: bin }
+          - { goos: linux,   platform: linux,   arch: arm,   arch_dir: arm,   ext: '',   prefix: bin, goarm: '7' }
+          # macOS builds are handed to the macos-package job for lipo + signing.
+          - { goos: darwin,  platform: macos,   arch: amd64, arch_dir: x64,   ext: '',   prefix: raw }
+          - { goos: darwin,  platform: macos,   arch: arm64, arch_dir: arm64, ext: '',   prefix: raw }
 
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -77,17 +45,11 @@ jobs:
       - name: Read version
         shell: bash
         run: |
-          if [ -f version.properties ]; then
-            source version.properties
-            echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
-            echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
-          else
-            echo "VERSION_NAME=dev" >> $GITHUB_ENV
-            echo "VERSION_CODE=0" >> $GITHUB_ENV
-          fi
+          source version.properties
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
+          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
 
       - name: Download modules
-        shell: bash
         working-directory: cli/src
         run: go mod download
 
@@ -96,28 +58,174 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.arch }}
+          GOARM: ${{ matrix.goarm }}
           CGO_ENABLED: '0'
         run: |
-          OUT_DIR="build-output/${{ matrix.platform }}/${{ matrix.arch_dir }}"
-          BIN="greenix-cli-v${VERSION_NAME}-${VERSION_CODE}${{ matrix.ext }}"
-          mkdir -p "$OUT_DIR"
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/out"
+          mkdir -p "$OUT"
           cd cli/src
           go build -trimpath \
-            -ldflags "-s -w -X main.Version=${VERSION_NAME} -X main.BuildCode=${VERSION_CODE} -X 'main.BuildDate=$(date -u '+%Y-%m-%d %H:%M:%S UTC')'" \
-            -o "$GITHUB_WORKSPACE/$OUT_DIR/$BIN" .
-          ls -lh "$GITHUB_WORKSPACE/$OUT_DIR"
+            -ldflags "-s -w \
+              -X main.Version=${VERSION_NAME} \
+              -X main.BuildCode=${VERSION_CODE} \
+              -X 'main.BuildDate=$(date -u '+%Y-%m-%d %H:%M:%S UTC')' \
+              -X 'main.GoVersion=$(go version | awk '{print $3}')'" \
+            -o "$OUT/${BIN_NAME}${{ matrix.ext }}" .
+          ls -lh "$OUT"
+
+      # upload-artifact does not preserve the executable bit, so ship a tar
+      # that does. Windows keeps the plain .exe (no exec bit on NTFS).
+      - name: Package artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd out
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            :
+          else
+            chmod +x "${BIN_NAME}"
+            tar -czf "${BIN_NAME}.tar.gz" "${BIN_NAME}"
+            rm "${BIN_NAME}"
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: greenix-cli-${{ matrix.platform }}-${{ matrix.arch_dir }}
-          path: build-output/${{ matrix.platform }}/${{ matrix.arch_dir }}/*
+          name: ${{ matrix.prefix }}-${{ matrix.platform }}-${{ matrix.arch_dir }}
+          path: out/*
           if-no-files-found: error
 
-  collect:
+  # ---------------------------------------------------------------------
+  # 2. macOS: build a universal binary, then codesign + notarize.
+  #    Without a Developer ID signature + notarization, Gatekeeper blocks
+  #    anything a browser downloaded ("cannot be opened / is damaged").
+  #    The signing steps are skipped automatically when the secrets are
+  #    absent, so the workflow still succeeds before certificates exist.
+  # ---------------------------------------------------------------------
+  macos-package:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
+    # Job-level env so the step-level `if` can test for the secret's presence
+    # (the `secrets` context is not available in step conditions).
+    env:
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
     steps:
+      - name: Download macOS builds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: raw-macos-*
+          path: raw
+
+      - name: Unpack and create universal binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/x64 work/arm64 work/universal
+          tar -xzf raw/raw-macos-x64/${BIN_NAME}.tar.gz   -C work/x64
+          tar -xzf raw/raw-macos-arm64/${BIN_NAME}.tar.gz -C work/arm64
+          lipo -create -output "work/universal/${BIN_NAME}" \
+            "work/x64/${BIN_NAME}" "work/arm64/${BIN_NAME}"
+          chmod +x work/*/"${BIN_NAME}"
+          lipo -info "work/universal/${BIN_NAME}"
+
+      - name: Import Developer ID certificate
+        id: cert
+        if: env.MACOS_CERT_P12 != ''
+        shell: bash
+
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 900 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+          rm -f "$RUNNER_TEMP/cert.p12"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Codesign binaries
+        if: steps.cert.outputs.signed == 'true'
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for arch in x64 arm64 universal; do
+            codesign --force --timestamp --options runtime \
+              --sign "$MACOS_SIGN_IDENTITY" "work/$arch/${BIN_NAME}"
+            codesign --verify --strict --verbose=2 "work/$arch/${BIN_NAME}"
+          done
+
+      - name: Create archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for arch in x64 arm64 universal; do
+            (cd "work/$arch" && zip -q "$GITHUB_WORKSPACE/dist/${BIN_NAME}-macos-$arch.zip" "${BIN_NAME}")
+            tar -czf "dist/${BIN_NAME}-macos-$arch.tar.gz" -C "work/$arch" "${BIN_NAME}"
+          done
+
+      # Notarization must target an archive: a bare binary cannot be stapled.
+      - name: Notarize archives
+        if: steps.cert.outputs.signed == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for arch in x64 arm64 universal; do
+            xcrun notarytool submit "dist/${BIN_NAME}-macos-$arch.zip" \
+              --apple-id "$APPLE_ID" \
+              --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_APP_PASSWORD" \
+              --wait --timeout 30m
+          done
+
+      - name: Repackage signed binaries for build-output
+        shell: bash
+        run: |
+          set -euo pipefail
+          for arch in x64 arm64 universal; do
+            mkdir -p "final/$arch"
+            cp "work/$arch/${BIN_NAME}" "final/$arch/${BIN_NAME}"
+            tar -czf "final/$arch/${BIN_NAME}.tar.gz" -C "work/$arch" "${BIN_NAME}"
+            rm "final/$arch/${BIN_NAME}"
+          done
+
+      - name: Upload macOS x64
+        uses: actions/upload-artifact@v4
+        with: { name: bin-macos-x64, path: final/x64/*, if-no-files-found: error }
+
+      - name: Upload macOS arm64
+        uses: actions/upload-artifact@v4
+        with: { name: bin-macos-arm64, path: final/arm64/*, if-no-files-found: error }
+
+      - name: Upload macOS universal
+        uses: actions/upload-artifact@v4
+        with: { name: bin-macos-universal, path: final/universal/*, if-no-files-found: error }
+
+  # ---------------------------------------------------------------------
+  # 3. Assemble build-output, sign Windows, publish checksums and release.
+  # ---------------------------------------------------------------------
+  collect:
+    needs: [build, macos-package]
+    runs-on: ubuntu-latest
+    env:
+      WINDOWS_CERT_P12: ${{ secrets.WINDOWS_CERT_P12 }}
+      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+    steps:
+
       - uses: actions/checkout@v4
 
       - name: Read version
@@ -130,20 +238,73 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: bin-*
           path: artifacts
 
       - name: Assemble build-output tree
         shell: bash
         run: |
-          for dir in artifacts/greenix-cli-*; do
-            name="$(basename "$dir")"
-            rest="${name#greenix-cli-}"
-            platform="${rest%-*}"
-            arch="${rest##*-}"
-            mkdir -p "build-output/$platform/$arch"
-            cp -r "$dir"/* "build-output/$platform/$arch/"
+          set -euo pipefail
+          for dir in artifacts/bin-*; do
+            rest="$(basename "$dir")"; rest="${rest#bin-}"
+            platform="${rest%%-*}"
+            arch="${rest#*-}"
+            out="build-output/$platform/$arch"
+            mkdir -p "$out"
+            if [ -f "$dir/${BIN_NAME}.tar.gz" ]; then
+              tar -xzf "$dir/${BIN_NAME}.tar.gz" -C "$out"
+              chmod +x "$out/${BIN_NAME}"
+            else
+              cp "$dir/${BIN_NAME}.exe" "$out/${BIN_NAME}.exe"
+            fi
           done
-          find build-output -type f | sort
+          find build-output -type f -exec ls -l {} \;
+
+      # Windows Authenticode signing (osslsigncode runs fine on Linux).
+      # Skipped until the certificate secrets exist.
+      - name: Sign Windows executables
+        if: env.WINDOWS_CERT_P12 != ''
+        shell: bash
+
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq osslsigncode
+          echo "$WINDOWS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/win.p12"
+          for exe in build-output/windows/*/${BIN_NAME}.exe; do
+            osslsigncode sign \
+              -pkcs12 "$RUNNER_TEMP/win.p12" -pass "$WINDOWS_CERT_PASSWORD" \
+              -n "Greenix CLI" -i "https://edgicode.com" \
+              -ts "http://timestamp.digicert.com" \
+              -in "$exe" -out "$exe.signed"
+            mv "$exe.signed" "$exe"
+            osslsigncode verify "$exe" || true
+          done
+          rm -f "$RUNNER_TEMP/win.p12"
+
+      - name: Build release archives and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          for dir in build-output/*/*; do
+            platform="$(basename "$(dirname "$dir")")"
+            arch="$(basename "$dir")"
+            if [ "$platform" = "windows" ]; then
+              (cd "$dir" && zip -q "$GITHUB_WORKSPACE/release-assets/${BIN_NAME}-${platform}-${arch}.zip" "${BIN_NAME}.exe")
+              cp "$dir/${BIN_NAME}.exe" \
+                 "release-assets/${BIN_NAME}-cli-v${VERSION_NAME}-${VERSION_CODE}-${platform}-${arch}.exe"
+            else
+              tar -czf "release-assets/${BIN_NAME}-${platform}-${arch}.tar.gz" -C "$dir" "${BIN_NAME}"
+              cp "$dir/${BIN_NAME}" \
+                 "release-assets/${BIN_NAME}-cli-v${VERSION_NAME}-${VERSION_CODE}-${platform}-${arch}"
+            fi
+          done
+          (cd release-assets && sha256sum * > SHA256SUMS)
+          cat release-assets/SHA256SUMS
+
+      - name: Publish checksums into build-output
+        shell: bash
+        run: cp release-assets/SHA256SUMS build-output/SHA256SUMS
 
       - name: Upload combined build-output
         uses: actions/upload-artifact@v4
@@ -155,11 +316,11 @@ jobs:
       - name: Commit build-output back to repository
         shell: bash
         run: |
+          set -euo pipefail
           git config user.name "mood810"
           git config user.email "mahmoodkaliika810@gmail.com"
           BRANCH="${{ github.event.repository.default_branch }}"
           git fetch origin "$BRANCH"
-          # keep the freshly assembled binaries while switching to the branch
           mv build-output "$RUNNER_TEMP/build-output"
           git checkout -B "$BRANCH" "origin/$BRANCH"
           rm -rf build-output
@@ -171,23 +332,6 @@ jobs:
             git commit -m "ci: publish build-output for v${VERSION_NAME}-${VERSION_CODE}"
             git push origin "HEAD:$BRANCH"
           fi
-
-      - name: Prepare release assets
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          # Release asset names must be unique, so flatten with platform/arch suffixes.
-          mkdir -p release-assets
-          find build-output -type f | while read -r f; do
-            platform="$(echo "$f" | cut -d/ -f2)"
-            arch="$(echo "$f" | cut -d/ -f3)"
-            base="$(basename "$f")"
-            name="${base%.exe}"
-            ext=""
-            [ "$base" != "$name" ] && ext=".exe"
-            cp "$f" "release-assets/${name}-${platform}-${arch}${ext}"
-          done
-          ls -lh release-assets
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/v')

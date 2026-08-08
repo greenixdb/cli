@@ -1,0 +1,41 @@
+{
+  "version": "0.1.0",
+  "description": "Greenix Studio CLI - build, deploy and manage Greenix Studio projects.",
+  "homepage": "https://github.com/greenixdb/cli",
+  "license": "Proprietary",
+  "notes": "Publisher: Edgicode Limited",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/greenixdb/cli/releases/download/v0.1.0/greenix-windows-x64.zip",
+      "hash": "REPLACE_WITH_SHA256_FROM_SHA256SUMS"
+    },
+    "32bit": {
+      "url": "https://github.com/greenixdb/cli/releases/download/v0.1.0/greenix-windows-x86.zip",
+      "hash": "REPLACE_WITH_SHA256_FROM_SHA256SUMS"
+    },
+    "arm64": {
+      "url": "https://github.com/greenixdb/cli/releases/download/v0.1.0/greenix-windows-arm64.zip",
+      "hash": "REPLACE_WITH_SHA256_FROM_SHA256SUMS"
+    }
+  },
+  "bin": "greenix.exe",
+  "checkver": {
+    "github": "https://github.com/greenixdb/cli"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/greenixdb/cli/releases/download/v$version/greenix-windows-x64.zip"
+      },
+      "32bit": {
+        "url": "https://github.com/greenixdb/cli/releases/download/v$version/greenix-windows-x86.zip"
+      },
+      "arm64": {
+        "url": "https://github.com/greenixdb/cli/releases/download/v$version/greenix-windows-arm64.zip"
+      }
+    },
+    "hash": {
+      "url": "https://github.com/greenixdb/cli/releases/download/v$version/SHA256SUMS"
+    }
+  }
+}
