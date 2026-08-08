@@ -19,7 +19,9 @@ func main() {
 	cmd.Version = Version
 	cmd.BuildCode = BuildCode
 	cmd.BuildDate = BuildDate
-	cmd.GoVersion = GoVersion
+	if GoVersion != "" {
+		cmd.GoVersion = GoVersion
+	}
 
 	if err := cmd.Execute(); err != nil {
 		fmt.Println(err)

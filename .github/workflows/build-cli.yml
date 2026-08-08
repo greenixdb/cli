@@ -5,63 +5,77 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - os: ubuntu-latest
             goos: windows
+            platform: windows
             arch: amd64
             arch_dir: x64
             ext: .exe
-          - os: windows-latest
+          - os: ubuntu-latest
             goos: windows
-            arch: 386
+            platform: windows
+            arch: '386'
             arch_dir: x86
             ext: .exe
-          - os: windows-latest
+          - os: ubuntu-latest
             goos: windows
+            platform: windows
             arch: arm64
             arch_dir: arm64
             ext: .exe
           - os: macos-latest
             goos: darwin
+            platform: macos
             arch: amd64
             arch_dir: x64
             ext: ''
           - os: macos-latest
             goos: darwin
+            platform: macos
             arch: arm64
             arch_dir: arm64
             ext: ''
           - os: ubuntu-latest
             goos: linux
+            platform: linux
             arch: amd64
             arch_dir: x64
             ext: ''
           - os: ubuntu-latest
             goos: linux
-            arch: 386
+            platform: linux
+            arch: '386'
             arch_dir: x86
             ext: ''
           - os: ubuntu-latest
             goos: linux
+            platform: linux
             arch: arm64
             arch_dir: arm64
             ext: ''
 
     runs-on: ${{ matrix.os }}
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
-      
+          cache-dependency-path: cli/src/go.sum
+
       - name: Read version
+        shell: bash
         run: |
           if [ -f version.properties ]; then
             source version.properties
@@ -71,21 +85,76 @@ jobs:
             echo "VERSION_NAME=dev" >> $GITHUB_ENV
             echo "VERSION_CODE=0" >> $GITHUB_ENV
           fi
+
+      - name: Download modules
         shell: bash
-      
+        working-directory: cli/src
+        run: go mod download
+
       - name: Build CLI
-        run: |
-          mkdir -p build-output/cli/${{ matrix.goos }}/${{ matrix.arch_dir }}
-          cd cli/src
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.arch }} go build \
-            -ldflags "-X main.Version=${{ env.VERSION_NAME }} -X main.BuildCode=${{ env.VERSION_CODE }} -X main.BuildDate=$(date '+%Y-%m-%d %H:%M:%S')" \
-            -o ../build-output/cli/${{ matrix.goos }}/${{ matrix.arch_dir }}/greenix-${{ env.VERSION_NAME }}-${{ env.VERSION_CODE }}${{ matrix.ext }}
         shell: bash
-      
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'
+        run: |
+          OUT_DIR="build-output/${{ matrix.platform }}/${{ matrix.arch_dir }}"
+          BIN="greenix-cli-v${VERSION_NAME}-${VERSION_CODE}${{ matrix.ext }}"
+          mkdir -p "$OUT_DIR"
+          cd cli/src
+          go build -trimpath \
+            -ldflags "-s -w -X main.Version=${VERSION_NAME} -X main.BuildCode=${VERSION_CODE} -X 'main.BuildDate=$(date -u '+%Y-%m-%d %H:%M:%S UTC')'" \
+            -o "$GITHUB_WORKSPACE/$OUT_DIR/$BIN" .
+          ls -lh "$GITHUB_WORKSPACE/$OUT_DIR"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cli-${{ matrix.goos }}-${{ matrix.arch_dir }}
-          path: build-output/cli/${{ matrix.goos }}/${{ matrix.arch_dir }}/
+          name: greenix-cli-${{ matrix.platform }}-${{ matrix.arch_dir }}
+          path: build-output/${{ matrix.platform }}/${{ matrix.arch_dir }}/*
+          if-no-files-found: error
 
-          
+  collect:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        shell: bash
+        run: |
+          source version.properties
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
+          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Assemble build-output tree
+        shell: bash
+        run: |
+          for dir in artifacts/greenix-cli-*; do
+            name="$(basename "$dir")"
+            rest="${name#greenix-cli-}"
+            platform="${rest%-*}"
+            arch="${rest##*-}"
+            mkdir -p "build-output/$platform/$arch"
+            cp -r "$dir"/* "build-output/$platform/$arch/"
+          done
+          find build-output -type f | sort
+
+      - name: Upload combined build-output
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output-v${{ env.VERSION_NAME }}-${{ env.VERSION_CODE }}
+          path: build-output/**
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build-output/**/*
+          generate_release_notes: true

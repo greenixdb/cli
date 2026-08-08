@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	cfgFile string
-	verbose bool
+	cfgFile     string
+	verbose     bool
+	showVersion bool
 )
 
 var rootCmd = &cobra.Command{
@@ -20,6 +21,23 @@ var rootCmd = &cobra.Command{
 	Long: `Greenix Studio CLI is a command-line tool for building, deploying,
 and managing Greenix Studio projects across multiple platforms.
 Complete documentation is available at https://docs.greenix.studio`,
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	Args:          cobra.ArbitraryArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if showVersion {
+			printVersion()
+			return nil
+		}
+		if len(args) > 0 {
+			color.Red("❌ Unknown command: %s", args[0])
+			fmt.Println()
+			displayHelp()
+			return fmt.Errorf("unknown command %q", args[0])
+		}
+		displayHelp()
+		return nil
+	},
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if verbose {
 			color.Set(color.FgYellow)
@@ -38,13 +56,26 @@ func init() {
 
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is .greenix.yaml)")
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "verbose output")
+	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "print version information")
+
+	// Route -h/--help through the branded help screen.
+	rootCmd.SetHelpFunc(func(c *cobra.Command, args []string) {
+		if c == rootCmd {
+			displayHelp()
+			return
+		}
+		c.Println(c.UsageString())
+	})
 
 	// Add subcommands
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(buildCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(helpCmd)
+	rootCmd.AddCommand(loginCmd)
+	rootCmd.AddCommand(logoutCmd)
+	rootCmd.AddCommand(whoamiCmd)
 }
 
 func initConfig() {
