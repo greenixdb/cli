@@ -172,9 +172,26 @@ jobs:
             git push origin "HEAD:$BRANCH"
           fi
 
+      - name: Prepare release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          # Release asset names must be unique, so flatten with platform/arch suffixes.
+          mkdir -p release-assets
+          find build-output -type f | while read -r f; do
+            platform="$(echo "$f" | cut -d/ -f2)"
+            arch="$(echo "$f" | cut -d/ -f3)"
+            base="$(basename "$f")"
+            name="${base%.exe}"
+            ext=""
+            [ "$base" != "$name" ] && ext=".exe"
+            cp "$f" "release-assets/${name}-${platform}-${arch}${ext}"
+          done
+          ls -lh release-assets
+
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: build-output/**/*
+          files: release-assets/*
           generate_release_notes: true
